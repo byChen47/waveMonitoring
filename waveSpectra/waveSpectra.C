@@ -481,6 +481,27 @@ int main(int argc, char* argv[])
     {
         fMax = 0.5/dt;
     }
+    else if (fMax > 0.5/dt)
+    {
+        std::cout << "WARNING: -fMax " << fMax
+                  << " is above the Nyquist frequency " << 0.5/dt
+                  << " 1/s, clamped" << std::endl;
+        fMax = 0.5/dt;
+    }
+
+    // The projection onto cos/sin assumes frequencies separated by about
+    // 1/T; a finer grid double counts the variance
+    const double dfNatural = 1.0/T;
+
+    if (df < 0.999*dfNatural)
+    {
+        std::cout << "WARNING: -df " << df
+                  << " is finer than the record resolution 1/T = "
+                  << dfNatural << " 1/s." << std::endl
+                  << "         The spectral moments (Hm0, Tm02) may be"
+                  << " overestimated; use the default -df for statistics."
+                  << std::endl;
+    }
 
     std::cout << "  window: t = " << times[sel.front()] << " .. "
               << times[sel.back()] << "  (" << sel.size() << " samples, dt = "
@@ -500,6 +521,8 @@ int main(int argc, char* argv[])
           << "  n: " << sel.size() << "  dt: " << dt << "\n"
           << "# df: " << df << "  fMax: " << fMax << "\n"
           << "# gauge\tHm0\tTp\tTm02\tTm01\tH1/3\tT1/3\tHmax\tHmean\tmwl\tnWaves\n";
+
+    size_t nWritten = 0;
 
     for (size_t g = 0; g < gauges.front().size(); ++g)
     {
@@ -545,11 +568,22 @@ int main(int argc, char* argv[])
               << st.hmax << '\t' << st.hmean << '\t' << st.mwl << '\t'
               << st.nWaves << '\n';
 
+        ++nWritten;
+
         std::cout << "  " << gname << '\t'
                   << st.hm0 << '\t' << st.tp << '\t' << st.tm02 << '\t'
                   << st.tm01 << '\t' << st.h13 << '\t' << st.t13 << '\t'
                   << st.hmax << '\t' << st.hmean << '\t' << st.mwl << '\t'
                   << st.nWaves << std::endl;
+    }
+
+    if (nWritten == 0)
+    {
+        std::cerr << "No gauge selected: -gauge " << gaugeSel
+                  << " but the file has " << gauges.front().size()
+                  << " gauge(s) (indices 0.."
+                  << gauges.front().size() - 1 << ")" << std::endl;
+        return 1;
     }
 
     std::cout << "\nWrote " << outDir << "/waveStats.dat and "

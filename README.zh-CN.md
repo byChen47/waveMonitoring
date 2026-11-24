@@ -395,6 +395,114 @@ waveSpectra/
 实测: Hm0 = 0.141398                H1/3 = 0.1        Tp = Tm02 = T1/3 = 1.200
 ```
 
+
+### 参数用法（逐条示例）
+
+所有参数都可省略。下面每条命令都在 `examples/spectra` 的同一条合成记录上实测
+（120 s、dt = 0.02 s、Hs = 0.05 m、Tp = 1.2 s）。
+
+| 目的 | 命令 |
+|---|---|
+| 默认：读默认路径、全记录、自动 `df`/`fMax` | `waveSpectra` |
+| 显式给输入和输出目录 | `waveSpectra -file elevation.dat -out out` |
+| 只分析 20–80 s（跳过启动瞬态） | `waveSpectra -file elevation.dat -tStart 20 -tEnd 80` |
+| 截掉高频，统计量只用到 6 Hz | `waveSpectra -file elevation.dat -fMax 6` |
+| 只输出第 1 个测点 | `waveSpectra -file elevation.dat -gauge 0` |
+| 完整组合 | `waveSpectra -file <elevation.dat> -out spectra -tStart 5 -fMax 6 -gauge 2` |
+
+**① 什么都不给** —— 在算例目录里直接跑，自动读默认路径：
+
+```bash
+cd <case>
+waveSpectra
+```
+
+```
+waveSpectra: read 6001 samples, 1 gauge(s) from postProcessing/waveElevation/waveElevation1/elevation.dat
+  window: t = 0 .. 120  (6001 samples, dt = 0.02 s)
+  df = 0.00833333 1/s   fMax = 25 1/s
+  out: waveSpectra
+...
+  eta0	0.050124	1.17647	0.966557	...
+```
+
+**② 指定文件与输出目录**
+
+```bash
+waveSpectra -file elevation.dat -out out_explicit
+```
+
+→ 写入 `out_explicit/waveStats.dat` 和 `out_explicit/eta0_spectrum.dat`。
+
+**③ 只分析一段时间窗**
+
+```bash
+waveSpectra -file elevation.dat -tStart 20 -tEnd 80
+```
+
+```
+  window: t = 20 .. 80  (3001 samples, dt = 0.02 s)
+  df = 0.0166667 1/s   fMax = 25 1/s
+  eta0	0.0515591	1.17647	0.949221	...
+```
+
+`df` 会随窗口长度自动变成 `1/(tEnd-tStart)`。
+
+**④ 限制最高分析频率**
+
+```bash
+waveSpectra -file elevation.dat -fMax 6
+```
+
+给得比 Nyquist 还大时，程序会自动截断并警告：
+
+```
+WARNING: -fMax 60 is above the Nyquist frequency 25 1/s, clamped
+```
+
+**⑤ 只算某一个测点**
+
+```bash
+waveSpectra -file elevation.dat -gauge 0
+```
+
+下标越界会明确报错（不会悄悄写一个空表）：
+
+```
+No gauge selected: -gauge 5 but the file has 1 gauge(s) (indices 0..0)
+```
+
+**⑥ 组合使用**
+
+```bash
+waveSpectra -file postProcessing/waveElevation/gauges/elevation.dat \
+            -out spectra -tStart 5 -fMax 6 -gauge 2
+```
+
+#### 参数之间的关系（容易踩的坑）
+
+| 现象 | 原因 | 建议 |
+|---|---|---|
+| 设了更细的 `-df` 后 `Hm0` 偏大（本例 0.072 vs 期望 0.05） | `df < 1/T` 时相邻频率不正交，方差被重复累加 | **一般不要设 `-df`**：默认的 `1/T` 才是正交分解 |
+| 设了更粗的 `-df` 后 `Hm0` 偏小（0.0467） | 频率太粗，谱尾部的能量被丢掉 | 同上，用默认值最稳 |
+| 改了 `-tStart/-tEnd` 后 `df` 跟着变 | `df` 默认 = `1/(记录长度)` | 知道即可；`Tp` 的偏差量级就是 `df` |
+| `-fMax` 超过 `1/(2dt)` | 会混叠 | 程序自动截断到 Nyquist 并警告 |
+| `-gauge` 用了不存在的下标 | 文件里只有 N 个测点 | 下标范围 `0..N-1`，与 `eta0/eta1/...` 列一一对应 |
+
+#### 现成配方
+
+```bash
+# 造波水槽：跳过前 5 s 的造波过渡
+waveSpectra -file postProcessing/waveElevation/gauges/elevation.dat -tStart 5
+
+# 晃荡：记录很长、只关心低频，截到 5 Hz
+waveSpectra -file postProcessing/waveElevation/tank/elevation.dat -fMax 5
+
+# 多点阵列：先全部算，再对第 3 个测点单独出谱复核
+waveSpectra -file .../elevation.dat -out all
+waveSpectra -file .../elevation.dat -gauge 2 -out gauge2
+```
+
 ### 算例：已知谱的合成波（`examples/spectra`，几秒钟跑完）
 
 `examples/spectra` 自带一个“已知答案”的完整算例：生成一条 JONSWAP 谱的合成自由面时程

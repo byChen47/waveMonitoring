@@ -394,6 +394,115 @@ Statistics:
 | `Hmax`, `Hmean` | Maximum / mean wave height | same decomposition |
 | `mwl` | Mean water level | record mean |
 
+
+### Parameter walkthrough
+
+Every option can be omitted; the defaults are listed in the table above. Each command
+below was run on the synthetic record of `examples/spectra`
+(120 s, dt = 0.02 s, Hs = 0.05 m, Tp = 1.2 s).
+
+| Goal | Command |
+|---|---|
+| Defaults: default path, whole record, automatic `df`/`fMax` | `waveSpectra` |
+| Give the input and the output directory | `waveSpectra -file elevation.dat -out out` |
+| Analyse 20-80 s only (skip the transient) | `waveSpectra -file elevation.dat -tStart 20 -tEnd 80` |
+| Cut the high frequencies (statistics to 6 Hz) | `waveSpectra -file elevation.dat -fMax 6` |
+| One gauge only | `waveSpectra -file elevation.dat -gauge 0` |
+| Everything together | `waveSpectra -file <elevation.dat> -out spectra -tStart 5 -fMax 6 -gauge 2` |
+
+**1) No arguments** - run it in the case directory, the default path is used:
+
+```bash
+cd <case>
+waveSpectra
+```
+
+```
+waveSpectra: read 6001 samples, 1 gauge(s) from postProcessing/waveElevation/waveElevation1/elevation.dat
+  window: t = 0 .. 120  (6001 samples, dt = 0.02 s)
+  df = 0.00833333 1/s   fMax = 25 1/s
+  out: waveSpectra
+...
+  eta0	0.050124	1.17647	0.966557	...
+```
+
+**2) Explicit input and output directory**
+
+```bash
+waveSpectra -file elevation.dat -out out_explicit
+```
+
+-> writes `out_explicit/waveStats.dat` and `out_explicit/eta0_spectrum.dat`.
+
+**3) Analyse a time window only**
+
+```bash
+waveSpectra -file elevation.dat -tStart 20 -tEnd 80
+```
+
+```
+  window: t = 20 .. 80  (3001 samples, dt = 0.02 s)
+  df = 0.0166667 1/s   fMax = 25 1/s
+  eta0	0.0515591	1.17647	0.949221	...
+```
+
+`df` becomes `1/(tEnd-tStart)` automatically.
+
+**4) Limit the highest analysed frequency**
+
+```bash
+waveSpectra -file elevation.dat -fMax 6
+```
+
+A value above Nyquist is clamped with a warning:
+
+```
+WARNING: -fMax 60 is above the Nyquist frequency 25 1/s, clamped
+```
+
+**5) One gauge only**
+
+```bash
+waveSpectra -file elevation.dat -gauge 0
+```
+
+An out-of-range index is an error (no silently empty table):
+
+```
+No gauge selected: -gauge 5 but the file has 1 gauge(s) (indices 0..0)
+```
+
+**6) Everything together**
+
+```bash
+waveSpectra -file postProcessing/waveElevation/gauges/elevation.dat \
+            -out spectra -tStart 5 -fMax 6 -gauge 2
+```
+
+#### How the options interact
+
+| Symptom | Cause | Advice |
+|---|---|---|
+| `Hm0` too large after setting `-df` (0.072 vs 0.05 above) | with `df < 1/T` adjacent frequencies are not orthogonal and the variance is counted twice | **do not set `-df`** in general; the default `1/T` is the orthogonal decomposition |
+| `Hm0` too small with a coarser `-df` (0.0467) | the grid is too coarse and the spectral tail is lost | same: use the default |
+| `df` changes when `-tStart/-tEnd` change | `df` defaults to `1/(record length)` | expected; the `Tp` uncertainty is of the order of `df` |
+| `-fMax` above `1/(2dt)` | aliasing | the tool clamps to Nyquist with a warning |
+| `-gauge` with a non-existing index | the file has only N gauges | valid range `0..N-1`, matching the `eta0/eta1/...` columns |
+
+#### Ready-made recipes
+
+```bash
+# wave flume: skip the 5 s wave-generation ramp
+waveSpectra -file postProcessing/waveElevation/gauges/elevation.dat -tStart 5
+
+# sloshing: long record, low frequencies only
+waveSpectra -file postProcessing/waveElevation/tank/elevation.dat -fMax 5
+
+# gauge array: analyse all, then produce a single-gauge spectrum
+waveSpectra -file .../elevation.dat -out all
+waveSpectra -file .../elevation.dat -gauge 2 -out gauge2
+```
+
 ### Worked example: a synthetic record with a known spectrum (`examples/spectra`)
 
 `examples/spectra` contains a complete, self-checking example: it synthesises a JONSWAP
