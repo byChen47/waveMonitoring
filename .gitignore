@@ -1,0 +1,11 @@
+# Build artefacts
+Make/linux*/
+waveSpectra/Make/linux*/
+gaugesNProbes/Make/linux*/
+lnInclude/
+*.o
+*.dep
+*.so
+
+# Output of a case run that happens to live next to the sources
+postProcessing/
