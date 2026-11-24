@@ -341,8 +341,14 @@ int main(int argc, char* argv[])
 
             os  << nl
                 << "        alpha           "
-                << dict.getOrDefault<word>("alpha", "alpha.water") << ';' << nl
-                << "        writeControl    " << writeControl << ';' << nl
+                << dict.getOrDefault<word>("alpha", "alpha.water") << ';' << nl;
+
+            if (!dict.getOrDefault<bool>("fixedLocations", true))
+            {
+                os  << "        fixedLocations  false;" << nl;
+            }
+
+            os  << "        writeControl    " << writeControl << ';' << nl
                 << "        writeInterval   " << writeInterval << ';' << nl
                 << "        log             false;" << nl;
 
@@ -382,8 +388,14 @@ int main(int argc, char* argv[])
                 os  << fields[fi];
             }
 
-            os  << ");" << nl
-                << "        writeControl    " << writeControl << ';' << nl
+            os  << ");" << nl;
+
+            if (!dict.getOrDefault<bool>("fixedLocations", true))
+            {
+                os  << "        fixedLocations  false;" << nl;
+            }
+
+            os  << "        writeControl    " << writeControl << ';' << nl
                 << "        writeInterval   " << writeInterval << ';' << nl;
 
             if (writeVTK)

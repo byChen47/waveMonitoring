@@ -68,6 +68,7 @@ Usage
         direction       (0 0 0);       // default: (0 0 0) -> use g
         interpolationScheme cellPoint; // default: cellPoint
         subtractReference false;       // default: false (absolute elevation)
+        fixedLocations  true;          // default: true (fixed in space)
         log             true;          // default: true
 
         // Inherited (writeControl controls the sampling rate)
@@ -87,12 +88,18 @@ Usage
       direction    | Direction of the (downward) interface normal | vector | no | (0 0 0)
       interpolationScheme | Interpolation scheme for alpha        | word | no   | cellPoint
       subtractReference | Subtract eta at the first write         | bool | no   | false
+      fixedLocations | Keep the gauges fixed in space (false: they move with the mesh) | bool | no | true
       log          | Report the gauges in the log                 | bool | no   | true
     \endtable
 
     Output file: \c postProcessing/waveElevation/<name>/elevation.dat
 
 Note
+    - \c fixedLocations follows the OpenFOAM \c probes convention:
+      with \c true (default) the gauge stays at the given position in space,
+      with \c false it is attached to the mesh cell it was created in and
+      moves with it (e.g. a gauge mounted on a moving body), keeping its
+      relative position.
     - Works with any solver that has an \c alpha field and a \c g field.
     - The gauge rays must be inside the mesh; the integration runs from the
       mesh boundary through the gauge location.
@@ -109,6 +116,8 @@ SourceFiles
 
 #include "fvMeshFunctionObject.H"
 #include "point.H"
+#include "pointField.H"
+#include "labelList.H"
 #include "OFstream.H"
 
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
@@ -152,6 +161,18 @@ class waveElevation
         //- Have the reference elevations been captured?
         bool haveReference_;
 
+        //- Keep the gauges fixed in space (false: move with the mesh)
+        bool fixedLocations_;
+
+        //- Local cell containing each gauge (-1 if not on this processor)
+        labelList cellIds_;
+
+        //- Cell-centre position recorded when the gauge was attached
+        List<point> cellC0_;
+
+        //- Last positions written (used to re-attach after a topology change)
+        List<point> lastLocations_;
+
         //- Output stream
         autoPtr<OFstream> filePtr_;
 
@@ -172,6 +193,12 @@ class waveElevation
 
         //- Elevation at the given gauge location (parallel safe, master valid)
         scalar elevation(const point& loc, const vector& gHat) const;
+
+        //- Attach the gauges to the cells containing them
+        void attachGauges(const List<point>& locs);
+
+        //- Current gauge positions (moved with the mesh when not fixed)
+        List<point> currentLocations() const;
 
 
 public:
@@ -205,6 +232,9 @@ public:
 
         //- Write the elevation time series
         virtual bool write();
+
+        //- Mesh topology changed: re-attach the gauges
+        virtual void updateMesh(const mapPolyMesh& mpm);
 };
 
 

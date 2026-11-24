@@ -34,6 +34,7 @@ License
 #include "midPointAndFaceSet.H"
 #include "uniformDimensionedFields.H"
 #include "volFields.H"
+#include "mapPolyMesh.H"
 
 // * * * * * * * * * * * * * * Static Data Members * * * * * * * * * * * * * //
 
@@ -64,6 +65,7 @@ void Foam::functionObjects::waveElevation::writeHeader()
         << "# liquid: " << liquid_ << nl
         << "# direction: " << direction_ << nl
         << "# subtractReference: " << subtractReference_ << nl
+        << "# fixedLocations: " << fixedLocations_ << nl
         << "# nGauges: " << locations_.size() << nl;
 
     forAll(locations_, li)
@@ -156,6 +158,93 @@ Foam::scalar Foam::functionObjects::waveElevation::elevation
 }
 
 
+void Foam::functionObjects::waveElevation::attachGauges(const List<point>& locs)
+{
+    cellIds_.setSize(locs.size(), -1);
+    cellC0_.setSize(locs.size(), Zero);
+
+    if (fixedLocations_)
+    {
+        // Fixed in space: the cell is searched again on every write
+        return;
+    }
+
+    meshSearch searchEngine(mesh_);
+
+    forAll(locs, li)
+    {
+        const label celli = searchEngine.findCell(locs[li]);
+
+        cellIds_[li] = celli;
+
+        if (celli >= 0)
+        {
+            cellC0_[li] = mesh_.C()[celli];
+        }
+        else
+        {
+            WarningInFunction
+                << "gauge " << li << " at " << locs[li]
+                << " is not inside the mesh - the gauge will not move"
+                << endl;
+        }
+    }
+}
+
+
+Foam::List<Foam::point>
+Foam::functionObjects::waveElevation::currentLocations() const
+{
+    List<point> result(locations_);
+
+    forAll(result, li)
+    {
+        // Displacement of the cell the gauge is attached to, reduced over
+        // the processors (only the owner finds the cell)
+        vector disp = Zero;
+        label n = 0;
+
+        if (cellIds_[li] >= 0)
+        {
+            disp = mesh_.C()[cellIds_[li]] - cellC0_[li];
+            n = 1;
+        }
+
+        reduce(disp, sumOp<vector>());
+        reduce(n, sumOp<label>());
+
+        if (n > 0)
+        {
+            result[li] += disp/scalar(n);
+        }
+    }
+
+    return result;
+}
+
+
+void Foam::functionObjects::waveElevation::updateMesh(const mapPolyMesh& mpm)
+{
+    if (fixedLocations_)
+    {
+        return;
+    }
+
+    // Topology changed: re-attach at the last known positions and make them
+    // the new anchor, so that the displacement stays consistent
+    const List<point> locs =
+    (
+        lastLocations_.size() == locations_.size()
+      ? lastLocations_
+      : locations_
+    );
+
+    attachGauges(locs);
+
+    locations_ = locs;
+}
+
+
 // * * * * * * * * * * * * * * * * Constructors  * * * * * * * * * * * * * * //
 
 Foam::functionObjects::waveElevation::waveElevation
@@ -174,6 +263,10 @@ Foam::functionObjects::waveElevation::waveElevation
     subtractReference_(false),
     reference_(),
     haveReference_(false),
+    fixedLocations_(true),
+    cellIds_(),
+    cellC0_(),
+    lastLocations_(),
     filePtr_()
 {
     read(dict);
@@ -186,16 +279,23 @@ Foam::functionObjects::waveElevation::waveElevation
 
 bool Foam::functionObjects::waveElevation::read(const dictionary& dict)
 {
+    // Pick up the function-object level switches (log, ...)
+    functionObject::read(dict);
+
     dict.readIfPresent("alpha", alphaName_);
     dict.readIfPresent("liquid", liquid_);
     dict.readIfPresent("interpolationScheme", interpolationScheme_);
     dict.readIfPresent("direction", direction_);
     dict.readIfPresent("subtractReference", subtractReference_);
 
+    dict.readIfPresent("fixedLocations", fixedLocations_);
+
     dict.readEntry("locations", locations_);
 
     reference_.setSize(locations_.size(), Zero);
     haveReference_ = false;
+
+    attachGauges(locations_);
 
     return true;
 }
@@ -245,11 +345,19 @@ bool Foam::functionObjects::waveElevation::write()
         }
     }
 
-    scalarField eta(locations_.size(), Zero);
+    // Gauge positions: fixed in space, or moved with the mesh
+    const List<point> locs =
+    (
+        fixedLocations_ ? locations_ : currentLocations()
+    );
 
-    forAll(locations_, li)
+    lastLocations_ = locs;
+
+    scalarField eta(locs.size(), Zero);
+
+    forAll(locs, li)
     {
-        eta[li] = elevation(locations_[li], gHat);
+        eta[li] = elevation(locs[li], gHat);
     }
 
     if (subtractReference_)
@@ -279,8 +387,14 @@ bool Foam::functionObjects::waveElevation::write()
         if (log)
         {
             Info<< "waveElevation " << name() << ": t = "
-                << mesh_.time().timeOutputValue() << "  eta = " << eta
-                << endl;
+                << mesh_.time().timeOutputValue() << "  eta = " << eta;
+
+            if (!fixedLocations_)
+            {
+                Info<< "  locations = " << locs;
+            }
+
+            Info<< endl;
         }
     }
 

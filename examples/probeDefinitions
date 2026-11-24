@@ -43,6 +43,10 @@ gaugeRow
     add                 (0 0.30 0);
     axis                y;
 
+    // fixedLocations false -> the gauges move with the mesh / moving body
+    // (relative position preserved).  Default: true (fixed in space)
+    //fixedLocations     false;
+
     // written into the generated function object (optional)
     writeControl        timeStep;
     writeInterval       1;

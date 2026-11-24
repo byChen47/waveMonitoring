@@ -138,8 +138,42 @@ postProcessing/waveElevation/waveElevation1/elevation.dat
 | `direction` | 界面法向（射线方向），一般不用给，用 `-g` | `(0 0 0)` |
 | `interpolationScheme` | α 在测点上的插值格式 | `cellPoint` |
 | `subtractReference` | 是否减去第一次写出的高程 | `false` |
+| `fixedLocations` | 测点固定在空间（`true`）还是随网格/物体移动（`false`，相对位置不变） | `true` |
 | `log` | 是否在 log 里打印每次采样 | `true` |
 | `writeControl`/`writeInterval` | 采样频率（继承 functionObject） | `timeStep`? 见 OF 默认 |
+
+### 固定测点 vs 随体移动测点（`fixedLocations`）
+
+和 OpenFOAM 自带 `probes` 的语义一致：
+
+| `fixedLocations` | 行为 |
+|---|---|
+| `true`（默认） | 测点**固定在空间**；网格运动时每次重新搜索所在单元，测到的始终是同一空间位置的水位 |
+| `false` | 测点在创建时“绑定”到所在单元，之后**跟着网格/物体一起运动**（相对位置不变），适合装在运动物体（晃荡舱、浮体、多孔挡板）上的波高仪 |
+
+实现方式：`false` 时记录测点所在单元的中心 `C0`，每次写出用 `C(t) - C0` 作为位移（并行下按处理器归约，取找到该单元的处理器的位移），
+`true` 时不做任何跟踪。拓扑变化（如 AMR、`dynamicRefineFCL`）后会自动按最后位置重新绑定。
+
+```cpp
+movingGauge
+{
+    type            waveElevation;
+    libs            ("libwaveMonitoring.so");
+    locations       ((0.25 0.05 0.0025));
+    fixedLocations  false;      // 随物体运动
+    writeControl    timeStep;
+    writeInterval   1;
+    log             true;       // 打开后 log 里会打印当前测点坐标
+}
+```
+
+**验证**（静水槽整体做 `x = 0.05 sin(10t)` 平移，同一初始位置放一个固定测点和一个移动测点，0.6 s / 43 个样本）：
+
+```
+固定测点 : log 中无 locations，水位随空间位置变化
+移动测点 : x - 0.05 sin(10t) = 0.250000 ± 1.2e-6 m
+           相对初始位置最大偏差 6.1e-7 m，eta 波动 5e-6 m
+```
 
 ### 高程是怎么算的
 
@@ -190,6 +224,7 @@ functions
 | `xValues` / `yValues` / `zValues` | `userDefinedDistribution`：直接给坐标，Field 语法如 `nonuniform 3(0.1 0.2 0.3)` |
 | 子字典 | `concatenatedDistribution`：把多个分布拼起来 |
 | `add` | 每个波高仪竖直线的起点→终点偏移（用于 VTK 显示） |
+| `fixedLocations` | `false` = 测点随网格/物体移动（默认 `true`，固定），会写进生成的对象 |
 | `writeControl` / `writeInterval` | 写进生成的对象（可选，默认 `timeStep` / `1`） |
 | `alpha` | `waveGauge` 用的 VOF 场名（可选，默认 `alpha.water`） |
 | `fields` | `probeGauge` 采样的场列表（可选，默认 `alpha.water`） |

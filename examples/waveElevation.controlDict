@@ -22,6 +22,11 @@
         direction           (0 0 0);
         interpolationScheme cellPoint;
         subtractReference   false;
+
+        // true (default): gauge fixed in space
+        // false: gauge moves with the mesh / body, relative position kept
+        fixedLocations      true;
+
         log                 true;
 
         // Sampling frequency
