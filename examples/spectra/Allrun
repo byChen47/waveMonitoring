@@ -1,0 +1,34 @@
+#!/bin/bash
+# ---------------------------------------------------------------------------
+# waveSpectra example: synthetic JONSWAP record with known Hs / Tp / Tm02.
+#
+#   ./Allrun            generate the record, analyse it, compare with theory
+#   ./Allclean          remove the generated files
+#
+# Requires the module to be built (../.. ./Allwmake) and a sourced OpenFOAM
+# environment.  No solver and no case are needed: this checks the spectral
+# analysis itself.
+# ---------------------------------------------------------------------------
+set -e
+
+cd "$(dirname "$0")" || exit 1
+
+if ! command -v waveSpectra >/dev/null 2>&1
+then
+    echo "ERROR: waveSpectra not found."
+    echo "       Source the OpenFOAM environment and run ./Allwmake in the"
+    echo "       module root first."
+    exit 1
+fi
+
+echo "=== generate synthetic JONSWAP record (Hs = 0.05 m, Tp = 1.2 s) ==="
+python3 makeSignal.py
+
+echo ""
+echo "=== waveSpectra ==="
+rm -rf waveSpectra
+waveSpectra -file elevation.dat -out waveSpectra
+
+echo ""
+echo "=== compare with the targets ==="
+python3 checkResults.py

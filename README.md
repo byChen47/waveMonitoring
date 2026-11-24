@@ -1,29 +1,31 @@
 # waveMonitoring
 
+**English** | [中文](README.zh-CN.md)
+
 [![License: GPL v3](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
 [![OpenFOAM](https://img.shields.io/badge/OpenFOAM-v2206%2B-2b6cb0.svg)](https://www.openfoam.com)
-[![Tested](https://img.shields.io/badge/tested-v2606%20%7C%20gcc%209.5-2f855a.svg)](#9-验证记录本机实测)
+[![Tested](https://img.shields.io/badge/tested-v2606%20%7C%20gcc%209.5-2f855a.svg)](#9-verification)
 
-**Standalone wave measurement for OpenFOAM** — free-surface elevation at gauges,
-gauge/probe generation from `probeDefinitions`, and spectral analysis. It works
-with **any** VOF solver (`interFoam`, `overInterFoam`, or your own) and links
-nothing from waves2Foam.
+**Standalone wave measurement for OpenFOAM.** It provides free-surface elevation at
+gauges, gauge/probe generation from `probeDefinitions`, and spectral analysis — with
+**no waves2Foam solver and no waves2Foam library**. Load the library from
+`controlDict` and it works with any solver that has a VOF field (`alpha.*`).
 
-| Component | Description |
-|---|---|
-| `libwaveMonitoring.so` | `waveElevation` function object: free-surface elevation eta(t) at a list of gauges, written to one self-describing file (optional body-fixed gauges) |
-| `GaugesNProbes` | reads `constant/probeDefinitions` (waves2Foam keywords) and writes a ready-to-include `functions` fragment |
-| `waveSpectra` | spectra and `Hm0`, `Tp`, `Tm02`, `Tm01`, `H1/3`, `T1/3`, `Hmax`, mean water level |
+```
+libwaveMonitoring.so  ──▶  waveElevation   free-surface elevation eta(t), one file
+GaugesNProbes         ──▶  probeDefinitions -> gauges -> functions fragment
+waveSpectra           ──▶  spectra and wave statistics
+```
 
-### Quick start
+## Quick start
 
 ```bash
 source ~/OpenFOAM/OpenFOAM-v2606/etc/bashrc        # any OpenFOAM v2206+
 git clone https://github.com/byChen47/waveMonitoring.git
-cd waveMonitoring && ./Allwmake                    # lib + waveSpectra + GaugesNProbes
+cd waveMonitoring && ./Allwmake                    # library + waveSpectra + GaugesNProbes
 ```
 
-Then, in any VOF case (`system/controlDict`):
+In any VOF case, `system/controlDict`:
 
 ```cpp
 functions
@@ -39,94 +41,75 @@ functions
 }
 ```
 
-and post-process the result:
+After the run:
 
 ```bash
 waveSpectra -file postProcessing/waveElevation/waveElevation1/elevation.dat \
             -out waveSpectra
 ```
 
-Or let `GaugesNProbes` generate the gauges from `constant/probeDefinitions`:
+Or let `GaugesNProbes` write the gauges from `constant/probeDefinitions`:
 
 ```bash
 GaugesNProbes -case .
 # then: functions { #include "gaugesNProbes.functions" }
 ```
 
-A 5-minute test with OpenFOAM's own `damBreak` tutorial is described in
-[`examples/`](examples). Gauges can be **fixed in space** (default) or
-**body-fixed** (`fixedLocations false`, following a moving body).
+Two self-contained examples are provided: a `damBreak` gauge test in [`examples/`](examples)
+and a JONSWAP spectral-analysis check in [`examples/spectra/`](examples/spectra).
 
 ---
 
-## 中文详细说明
+## 1. Why a separate module
 
-从 waves2Foam 里**单独剥离**出来的“测量波浪”部分：**不再需要 waves2Foam 的求解器，也不链接 waves2Foam 的任何库**，
-只要把 `libwaveMonitoring.so` 用 `libs` 加载进 `controlDict`，任何带 VOF 场（`alpha.*`）的求解器都能用。
-
-```
-libwaveMonitoring.so  ──▶  waveElevation   自由面高程时程（function object）
-GaugesNProbes         ──▶  probeDefinitions 批量生成测点 → functions 片段
-waveSpectra           ──▶  谱分析 / 统计量（独立后处理程序）
-```
-
----
-
-## 1. 为什么单独拆出来
-
-waves2Foam 原来的测波链路是：
+The original waves2Foam measurement chain is tied to its own build system:
 
 ```
-sampledSurfaceElevation (waves2FoamSampling)   ← 需要 waves2Foam 的版本目录
-      ↓ 原始 alpha 采样
-postProcessWaves2Foam  (waves2FoamProcessing)  ← 链接 libwaves2Foam + GSL
+sampledSurfaceElevation (waves2FoamSampling)   <- version-specific directory
+      ↓  raw alpha samples
+postProcessWaves2Foam  (waves2FoamProcessing)  <- links libwaves2Foam + GSL
       ↓ eta(t)
-powerSpectraLS / reflectionAnalysis            ← 谱分析
+powerSpectraLS / reflectionAnalysis            <- spectral analysis
 ```
 
-问题：整条链路跟着 waves2Foam 的构建体系走（`WAVES_*` 环境、`bin/bashrc`、`-lwaves2Foam`），
-换个求解器（比如你自己的 `interFoam`、`overInterFoam`、带多孔挡板的晃荡求解器）就不方便用。
+Using that with your own solver (`interFoam`, `overInterFoam`, a sloshing solver with
+porous baffles, ...) means dragging in `WAVES_*` environment variables, `bin/bashrc`
+and `-lwaves2Foam`.
 
-本模块把“测波”重写成**只依赖 OpenFOAM 本身**：
+This module re-implements the measurement part against **OpenFOAM only**:
 
-| 能力 | waves2Foam 原实现 | 本模块 |
+| Capability | waves2Foam | this module |
 |---|---|---|
-| 自由面高程 | `surfaceElevation`（写原始 alpha 采样，需二次插值） | `waveElevation`（**直接**输出 η(t)，一个文件） |
-| 谱分析 | `postProcessWaves2Foam`（链接 `-lwaves2Foam -lgsl`） | `waveSpectra`（只链接 `-lOpenFOAM`） |
-| 依赖 | `libwaves2Foam.so`、`libwaves2FoamProcessing.so`、GSL | 只要 OpenFOAM |
+| Free-surface elevation | `surfaceElevation` (raw alpha samples, needs a second interpolation step) | `waveElevation` (writes eta(t) directly, single file) |
+| Spectral analysis | `postProcessWaves2Foam` (links `-lwaves2Foam -lgsl`) | `waveSpectra` (links `-lOpenFOAM` only) |
+| Dependencies | `libwaves2Foam.so`, `libwaves2FoamProcessing.so`, GSL | OpenFOAM only |
 
-**可以和 waves2Foam 同时存在**：类型名不同（`waveElevation` vs `surfaceElevation`），不会重复注册。
+The type name is different (`waveElevation` vs `surfaceElevation`), so the module can be
+loaded **alongside** waves2Foam without a duplicate registration.
 
----
+## 2. Requirements
 
-## 2. 依赖
+- OpenFOAM **v2206+** (developed and tested with **v2606 / g++ 9.5**)
+- A case with an `alpha` field (default `alpha.water`) and `g` (`constant/g`)
+- No GSL, no waves2Foam
 
-- OpenFOAM v2206+（本模块在 **v2606 / g++ 9.5** 上编译并实测）
-- 算例里有 `alpha` 场（VOF，默认 `alpha.water`）和 `g`（`constant/g`）
-- 不需要 GSL，不需要 waves2Foam
-
-## 3. 编译
+## 3. Building
 
 ```bash
 source ~/OpenFOAM/OpenFOAM-v2606/etc/bashrc
-cd waveMonitoring          # 仓库根目录
-./Allwmake
+cd waveMonitoring
+./Allwmake              # or ./Allwclean to start from scratch
 ```
 
-产物：
+Artefacts:
 
 ```
 $FOAM_USER_LIBBIN/libwaveMonitoring.so
 $FOAM_USER_APPBIN/waveSpectra
+$FOAM_USER_APPBIN/GaugesNProbes
 ```
 
-清理：`./Allwclean`
-
----
-
-## 4. 使用：在任意求解器里测波
-
-在 `system/controlDict` 里加（`functions { }` 已存在就加进去）：
+## 4. Measuring with `waveElevation`
 
 ```cpp
 functions
@@ -136,37 +119,44 @@ functions
         type            waveElevation;
         libs            ("libwaveMonitoring.so");
 
-        // 必填：测点坐标（射线方向上的位置，一般放在你关心的水面附近）
+        // Mandatory: gauge locations
         locations       ((0.10 0.05 0.005) (0.25 0.05 0.005) (0.40 0.05 0.005));
 
-        // 可选（括号内为默认值）
-        alpha               alpha.water;   // VOF 场名
-        liquid              true;          // alpha=1 是液体
-        direction           (0 0 0);       // (0 0 0) → 用 g 的反方向
-        interpolationScheme cellPoint;     // alpha 的插值格式
-        subtractReference   false;         // true → 输出相对第一次写出的起伏
-        log                 true;          // 屏幕打印
+        // Optional (defaults shown)
+        alpha               alpha.water;
+        liquid              true;
+        direction           (0 0 0);       // (0 0 0) -> use -g
+        interpolationScheme cellPoint;
+        subtractReference   false;
+        fixedLocations      true;
+        log                 true;
 
-        // 采样频率由这里控制（跟求解器写出时刻无关）
+        // Sampling rate (independent of the solver's write times)
         writeControl    timeStep;
         writeInterval   1;
     }
 }
 ```
 
-然后正常运行求解器即可，例如：
+### Parameters
 
-```bash
-interFoam
-```
+| Entry | Meaning | Default |
+|---|---|---|
+| `locations` | Gauge coordinates (`vectorList`), mandatory | — |
+| `alpha` | VOF field name | `alpha.water` |
+| `liquid` | `true`: alpha = 1 is the liquid; `false`: alpha = 1 is the gas | `true` |
+| `direction` | Interface normal (ray direction); leave at zero to use `-g` | `(0 0 0)` |
+| `interpolationScheme` | Interpolation of alpha at the sample points | `cellPoint` |
+| `subtractReference` | Subtract the elevation of the first write | `false` |
+| `fixedLocations` | Keep the gauges fixed in space (`true`) or move them with the mesh (`false`) | `true` |
+| `log` | Print every sample to the log | `true` |
+| `writeControl` / `writeInterval` | Sampling rate (inherited from the function object) | `timeStep` / `1` |
 
-输出（单文件、逐行累积）：
+### Output
 
 ```
 postProcessing/waveElevation/waveElevation1/elevation.dat
 ```
-
-格式：
 
 ```
 # waveElevation: free-surface elevation (integrated liquid height)
@@ -175,6 +165,7 @@ postProcessing/waveElevation/waveElevation1/elevation.dat
 # liquid: 1
 # direction: (0 0 0)
 # subtractReference: 0
+# fixedLocations: 1
 # nGauges: 3
 # location 0: (0.1 0.05 0.005)
 # location 1: (0.25 0.05 0.005)
@@ -185,35 +176,32 @@ postProcessing/waveElevation/waveElevation1/elevation.dat
 ...
 ```
 
-- 第 1 列是时间，后面每列对应一个 `locations` 测点；
-- 表头带测点坐标，文件自描述，`waveSpectra` 直接能读；
-- 并行算例只在 master 写（数值是全处理器归约后的结果）。
+One row per write time; column 1 is time, the remaining columns are the gauges in the
+order of `locations`. The header is self-describing, so `waveSpectra` can read the file
+without any additional input. In parallel the file is written by the master only; the
+values are reduced over all processors.
 
-### 参数说明
+### How the elevation is computed
 
-| 参数 | 含义 | 默认 |
-|---|---|---|
-| `locations` | 测点坐标列表（vectorList），必填 | — |
-| `alpha` | VOF 场名 | `alpha.water` |
-| `liquid` | `true`：α=1 为液体；`false`：α=1 为气体 | `true` |
-| `direction` | 界面法向（射线方向），一般不用给，用 `-g` | `(0 0 0)` |
-| `interpolationScheme` | α 在测点上的插值格式 | `cellPoint` |
-| `subtractReference` | 是否减去第一次写出的高程 | `false` |
-| `fixedLocations` | 测点固定在空间（`true`）还是随网格/物体移动（`false`，相对位置不变） | `true` |
-| `log` | 是否在 log 里打印每次采样 | `true` |
-| `writeControl`/`writeInterval` | 采样频率（继承 functionObject） | `timeStep`? 见 OF 默认 |
+A ray is cast through the gauge along `-direction` (by default vertically upwards) and
+the liquid fraction is integrated along it:
 
-### 固定测点 vs 随体移动测点（`fixedLocations`）
+```
+eta = integral( alpha dl )
+```
 
-和 OpenFOAM 自带 `probes` 的语义一致：
+For a flat-bottom tank this is exactly the free-surface height above the bottom. Compared
+with locating a single `alpha = 0.5` iso-surface crossing, the integral stays well behaved
+for aerated, breaking or splashing surfaces, where no unique crossing may exist.
 
-| `fixedLocations` | 行为 |
+### Fixed vs. moving gauges (`fixedLocations`)
+
+The semantics follow OpenFOAM's `probes`:
+
+| `fixedLocations` | Behaviour |
 |---|---|
-| `true`（默认） | 测点**固定在空间**；网格运动时每次重新搜索所在单元，测到的始终是同一空间位置的水位 |
-| `false` | 测点在创建时“绑定”到所在单元，之后**跟着网格/物体一起运动**（相对位置不变），适合装在运动物体（晃荡舱、浮体、多孔挡板）上的波高仪 |
-
-实现方式：`false` 时记录测点所在单元的中心 `C0`，每次写出用 `C(t) - C0` 作为位移（并行下按处理器归约，取找到该单元的处理器的位移），
-`true` 时不做任何跟踪。拓扑变化（如 AMR、`dynamicRefineFCL`）后会自动按最后位置重新绑定。
+| `true` (default) | The gauge stays at the given position in space; the cell is searched again on every write |
+| `false` | The gauge is attached to the cell it was created in and **moves with the mesh/body**, keeping its relative position — for gauges mounted on a moving body (sloshing tank, floater, porous baffle) |
 
 ```cpp
 movingGauge
@@ -221,49 +209,39 @@ movingGauge
     type            waveElevation;
     libs            ("libwaveMonitoring.so");
     locations       ((0.25 0.05 0.0025));
-    fixedLocations  false;      // 随物体运动
-    writeControl    timeStep;
-    writeInterval   1;
-    log             true;       // 打开后 log 里会打印当前测点坐标
+    fixedLocations  false;      // follows the mesh
+    log             true;       // prints the current positions
 }
 ```
 
-**验证**（静水槽整体做 `x = 0.05 sin(10t)` 平移，同一初始位置放一个固定测点和一个移动测点，0.6 s / 43 个样本）：
+Implementation: with `false`, the cell-centre position `C0` is recorded when the gauge is
+created, and the displacement `C(t) - C0` is applied on every write (reduced over the
+processors so that only the owner of the cell contributes). After a topology change the
+gauges are re-attached at their last known positions.
+
+**Verification** — still water in a tank translated as `x = 0.05 sin(10t)`, one fixed and
+one moving gauge at the same initial point, 0.6 s / 43 samples:
 
 ```
-固定测点 : log 中无 locations，水位随空间位置变化
-移动测点 : x - 0.05 sin(10t) = 0.250000 ± 1.2e-6 m
-           相对初始位置最大偏差 6.1e-7 m，eta 波动 5e-6 m
+fixed gauge : no position output in the log (it does not move)
+moving gauge: x - 0.05 sin(10t) = 0.250000 +/- 1.2e-6 m
+              maximum deviation of the relative position: 6.1e-7 m
+              eta spread: 5e-6 m
 ```
 
-### 高程是怎么算的
+## 5. Generating gauges from `probeDefinitions` (`GaugesNProbes`)
 
-沿 `-direction`（默认竖直向上）穿过测点做一条射线，对液体体积分数做线积分：
-
-```
-eta = ∫ alpha dl
-```
-
-对平底水槽，这正好是**自由面到槽底的高度**。相比“找 alpha=0.5 等值面交点”，
-积分法在掺气、破碎、飞溅时更稳（不会因为找不到单一交点而跳变）。
-
-> 如果用 `direction` 指定了别的方向，等价高度就是沿该方向的水柱长度。
-
----
-
-## 5. 用 `probeDefinitions` 批量生成波高仪（`GaugesNProbes`）
-
-手写 `locations` 适合少量测点；测点一多（晃荡、多孔挡板那种几十个测点），用
-`GaugesNProbes` 从 `constant/probeDefinitions` 批量生成。它是 waves2Foam 的
-`waveGaugesNProbes` 的独立替代，**只依赖 OpenFOAM**。
+For a handful of gauges, writing `locations` by hand is fine. For many gauges (dozens of
+positions in a sloshing tank, arrays along a wall, ...) use `GaugesNProbes`, which replaces
+waves2Foam's `waveGaugesNProbes` and depends on OpenFOAM only.
 
 ```bash
 cd <case>
-GaugesNProbes -case .          # 读 constant/probeDefinitions
-# → system/gaugesNProbes.functions  +  gaugesNProbes/<name>.vtk
+GaugesNProbes -case .          # reads constant/probeDefinitions
+# -> system/gaugesNProbes.functions  +  gaugesNProbes/<name>.vtk
 ```
 
-然后在 `system/controlDict` 的 `functions {}` 里加一行：
+Then, in `system/controlDict`:
 
 ```cpp
 functions
@@ -272,25 +250,30 @@ functions
 }
 ```
 
-### `probeDefinitions` 关键字（沿用 waves2Foam，现有文件可直接用）
+### `probeDefinitions` keywords
 
-| 关键字 | 含义 |
+The keywords are the waves2Foam ones, so existing files work unchanged:
+
+| Keyword | Meaning |
 |---|---|
-| `type` | `waveGauge` → 生成 `waveElevation`；`probeGauge` → 生成 OF `probes` |
-| `pointDistribution` | 测点分布类型（见下） |
-| `N` | 该分布的测点数 |
-| `linestart` / `lineend` / `stretch` | `lineDistribution`：直线布点（`stretch` 可选） |
-| `centre` / `radius` / `axis` | `circularDistribution`：圆周布点 |
-| `linestart0` / `lineend0` / `lineend1` / `N0` / `N1` / `stretch0` / `stretch1` | `quadrilateralDistribution`：四边形面布点 |
-| `xValues` / `yValues` / `zValues` | `userDefinedDistribution`：直接给坐标，Field 语法如 `nonuniform 3(0.1 0.2 0.3)` |
-| 子字典 | `concatenatedDistribution`：把多个分布拼起来 |
-| `add` | 每个波高仪竖直线的起点→终点偏移（用于 VTK 显示） |
-| `fixedLocations` | `false` = 测点随网格/物体移动（默认 `true`，固定），会写进生成的对象 |
-| `writeControl` / `writeInterval` | 写进生成的对象（可选，默认 `timeStep` / `1`） |
-| `alpha` | `waveGauge` 用的 VOF 场名（可选，默认 `alpha.water`） |
-| `fields` | `probeGauge` 采样的场列表（可选，默认 `alpha.water`） |
+| `type` | `waveGauge` -> one `waveElevation` object; `probeGauge` -> one OpenFOAM `probes` object |
+| `pointDistribution` | Distribution type (see below) |
+| `N` | Number of points of this distribution |
+| `linestart` / `lineend` / `stretch` | `lineDistribution`: points along a line (`stretch` optional) |
+| `centre` / `radius` / `axis` | `circularDistribution`: points on a circle |
+| `linestart0` / `lineend0` / `lineend1` / `N0` / `N1` / `stretch0` / `stretch1` | `quadrilateralDistribution`: points on a quadrilateral |
+| `xValues` / `yValues` / `zValues` | `userDefinedDistribution`: explicit coordinates, Field syntax `nonuniform 3(0.1 0.2 0.3)` |
+| sub-dictionaries | `concatenatedDistribution`: several distributions concatenated |
+| `add` | Start -> end offset of each gauge line (used for the VTK view) |
+| `fixedLocations` | `false` = the gauge moves with the mesh/body (default `true`), written into the generated object |
+| `writeControl` / `writeInterval` | Written into the generated object (optional, defaults `timeStep` / `1`) |
+| `alpha` | VOF field for `waveGauge` (optional, default `alpha.water`) |
+| `fields` | Fields sampled by `probeGauge` (optional, default `alpha.water`) |
 
-示例（`examples/probeDefinitions` 可直接拷去改）：
+Distribution types: `lineDistribution`, `circularDistribution`, `quadrilateralDistribution`,
+`concatenatedDistribution`, `userDefinedDistribution`.
+
+### Example
 
 ```cpp
 gaugeRow
@@ -318,19 +301,21 @@ pointProbes
 }
 ```
 
-生成的 `system/gaugesNProbes.functions`（可直接改）：
+### Generated fragment
 
 ```cpp
     gaugeRow
     {
         type            waveElevation;
         libs            ("libwaveMonitoring.so");
+
         locations
         (
             (0.1 0.05 0.0025)
             (0.3 0.05 0.0025)
             (0.5 0.05 0.0025)
         );
+
         alpha           alpha.water;
         writeControl    timeStep;
         writeInterval   1;
@@ -341,33 +326,36 @@ pointProbes
     {
         type            probes;
         libs            (sampling);
+
         probeLocations
         (
             (0.2 0.1 0.0025)
             (0.3 0.1 0.0025)
         );
+
         fields          (alpha.water U);
         writeControl    timeStep;
         writeInterval   1;
     }
 ```
 
-### 命令行选项
+### Command line
 
-| 选项 | 默认 | 说明 |
+| Option | Default | Meaning |
 |---|---|---|
-| `-case <dir>` | `.` | 算例目录 |
-| `-dict <file>` | `constant/probeDefinitions` | 布局文件 |
-| `-out <file>` | `system/gaugesNProbes.functions` | 生成的 functions 片段 |
-| `-functionObject <type>` | `waveElevation` | `waveGauge` 用的对象类型 |
-| `-libs <lib>` | `libwaveMonitoring.so` | 该对象所在的库 |
-| `-noVTK` | 关 | 不写 `gaugesNProbes/<name>.vtk` |
+| `-case <dir>` | `.` | Case directory |
+| `-dict <file>` | `constant/probeDefinitions` | Gauge layout |
+| `-out <file>` | `system/gaugesNProbes.functions` | Generated fragment |
+| `-functionObject <type>` | `waveElevation` | Object type used for `waveGauge` entries |
+| `-libs <lib>` | `libwaveMonitoring.so` | Library of that object |
+| `-noVTK` | off | Skip `gaugesNProbes/<name>.vtk` |
 
-> 生成文件里每个分组名 = function object 名，所以 `probeDefinitions` 里的名字要唯一。
-> 跑完求解器：波高仪数据在 `postProcessing/waveElevation/<name>/elevation.dat`，
-> 点探针数据在 `postProcessing/<name>/<time>/<field>`（OF `probes` 的格式）。
+The group name in `probeDefinitions` becomes the function-object name, so the names must
+be unique. After the run, the gauge data is in
+`postProcessing/waveElevation/<name>/elevation.dat` and the point probes in
+`postProcessing/<name>/<time>/<field>` (the usual `probes` layout).
 
-## 6. 后处理：谱分析与统计量
+## 6. Spectral analysis and statistics (`waveSpectra`)
 
 ```bash
 waveSpectra [-file <elevation.dat>] [-out <dir>]
@@ -375,128 +363,176 @@ waveSpectra [-file <elevation.dat>] [-out <dir>]
             [-gauge <i>|all]
 ```
 
-| 参数 | 含义 | 默认 |
+| Option | Meaning | Default |
 |---|---|---|
-| `-file` | 输入文件 | `postProcessing/waveElevation/waveElevation1/elevation.dat` |
-| `-out` | 输出目录 | `waveSpectra` |
-| `-tStart` / `-tEnd` | 分析时间窗（跳过造波/瞬态段） | 全记录 |
-| `-df` | 频率分辨率 | `1/T`（T=记录长度） |
-| `-fMax` | 最高分析频率 | `1/(2dt)`（Nyquist） |
-| `-gauge` | 只分析某个测点（0,1,2…） | `all` |
+| `-file` | Input file | `postProcessing/waveElevation/waveElevation1/elevation.dat` |
+| `-out` | Output directory | `waveSpectra` |
+| `-tStart` / `-tEnd` | Analysis window (skip the ramp-up / transient) | whole record |
+| `-df` | Frequency resolution | `1/T` (T = record length) |
+| `-fMax` | Highest analysed frequency | `1/(2dt)` (Nyquist) |
+| `-gauge` | Analyse one gauge only (0, 1, 2, ...) | `all` |
 
-输出：
+Output:
 
 ```
 waveSpectra/
-├── waveStats.dat          # 汇总表：Hm0, Tp, Tm02, Tm01, H1/3, T1/3, Hmax, Hmean, mwl, 波数
-├── eta0_spectrum.dat      # 每个测点一份：f  S(f)（单边方差密度）
+├── waveStats.dat          # summary: Hm0, Tp, Tm02, Tm01, H1/3, T1/3, Hmax, Hmean, mwl, waves
+├── eta0_spectrum.dat      # one per gauge: f  S(f)  (one-sided variance density)
 ├── eta1_spectrum.dat
 └── ...
 ```
 
-统计量：
+Statistics:
 
-| 符号 | 含义 | 算法 |
+| Symbol | Meaning | Definition |
 |---|---|---|
-| `Hm0` | 谱有效波高 | `4*sqrt(m0)` |
-| `Tp` | 谱峰周期 | `1/f(S_max)` |
-| `Tm02` | 谱平均周期 | `sqrt(m0/m2)` |
-| `Tm01` | 谱平均周期（一阶矩） | `m0/m1` |
-| `H1/3`, `T1/3` | 有效波高/周期（时域） | 上跨零点分波，取最高 1/3 平均 |
-| `Hmax`, `Hmean` | 最大/平均波高 | 同上 |
-| `mwl` | 平均水位 | 记录均值 |
+| `Hm0` | Significant wave height from the spectrum | `4*sqrt(m0)` |
+| `Tp` | Peak period | `1/f(S_max)` |
+| `Tm02` | Spectral mean period | `sqrt(m0/m2)` |
+| `Tm01` | Spectral mean period (first moment) | `m0/m1` |
+| `H1/3`, `T1/3` | Significant wave height/period (time domain) | zero up-crossing waves, mean of the highest third |
+| `Hmax`, `Hmean` | Maximum / mean wave height | same decomposition |
+| `mwl` | Mean water level | record mean |
 
-**数值校验**（合成正弦波 A=0.05 m, T=1.2 s, 60 s 记录, dt=0.01 s）：
+### Worked example: a synthetic record with a known spectrum (`examples/spectra`)
+
+`examples/spectra` contains a complete, self-checking example: it synthesises a JONSWAP
+free-surface record (Hs = 0.05 m, Tp = 1.2 s), runs `waveSpectra` on it and compares the
+result with the theoretical values of the discretised spectrum. **No solver and no mesh
+are needed** — it validates the analysis itself.
+
+```bash
+cd waveMonitoring/examples/spectra
+./Allrun
+```
+
+`Allrun` does three things:
+
+1. `makeSignal.py` builds `elevation.dat` from 400 frequency components (same format as
+   the `waveElevation` output, 120 s, dt = 0.02 s) and writes the exact targets of the
+   discretised spectrum to `targets.txt`;
+2. `waveSpectra -file elevation.dat -out waveSpectra`;
+3. `checkResults.py` compares `waveSpectra/waveStats.dat` with `targets.txt` and returns
+   non-zero if a quantity is outside the tolerance.
+
+Measured output:
 
 ```
-理论: Hm0 = 2*sqrt(2)*A = 0.14142   H1/3 = 2A = 0.1   Tp = Tm02 = T1/3 = 1.2
-实测: Hm0 = 0.141398                H1/3 = 0.1        Tp = Tm02 = T1/3 = 1.200
+  quantity        target       recovered     rel.error
+  --------------- ------------ ------------- ----------
+  Hm0             0.050000     0.050124      2.48e-03
+  Tp              1.194401     1.176470      1.50e-02
+  Tm02            0.961586     0.966557      5.17e-03
+
+  tolerance: 3.0%
+  VERDICT  : PASS
 ```
 
----
+Reading it:
 
-## 7. 在任何求解器上使用
-
-只要有 `alpha` 场就能用，与求解器类型无关：
-
-| 求解器 | 说明 |
+| Quantity | Comment |
 |---|---|
-| `interFoam` / `overInterFoam` | 标准 VOF，直接可用（已用 `interFoam` + damBreak 实测） |
-| `porousWaveFoam` / `waveFoam` | 也可用（此时与 waves2Foam 的 `surfaceElevation` 并存不冲突） |
-| 自研求解器 | 只要 `alpha.water` 在 `objectRegistry` 里即可 |
+| `Hm0` | 0.25% from the input `Hs`; the remainder is frequency discretisation |
+| `Tp` | 1.176 s vs 1.194 s: 1.5%, i.e. of the order of the frequency resolution `df = 1/120 = 0.0083 1/s` |
+| `Tm02` | 0.967 s vs 0.962 s: 0.5% |
 
-**注意**：`libwaveMonitoring.so` 只提供 function object，不做造波/消波；造波仍由你算例的边界条件决定。
+Vary the input directly on the command line:
 
-### 关于 `locations` 怎么取
+```bash
+python3 makeSignal.py --hs 0.1 --tp 1.6 --duration 180
+waveSpectra -file elevation.dat -out waveSpectra && python3 checkResults.py
+```
 
-- 平底水槽：`(x, z_still_water, 0)` 即可，y 坐标只决定射线穿过哪里（射线会贯穿整个 bbox）；
-- 需要多点阵列：直接列出来，或用 OpenFOAM 的 `#calc` / `#eval` 生成；
-- 测点必须在网格内。
+For real CFD data, point `-file` at your
+`postProcessing/waveElevation/<name>/elevation.dat`; use `-tStart` to skip the ramp-up:
 
----
+```bash
+waveSpectra -file postProcessing/waveElevation/gauges/elevation.dat \
+            -out spectra -tStart 5
+```
 
-## 8. 已知限制
+## 7. Using it with any solver
 
-- 谱分析假设**均匀时间步**（`dt` 取平均）；非均匀输出请先插值到等间隔。
-- `userDefinedDistribution` 的坐标必须是 Field 语法（`nonuniform 3(0.1 0.2 0.3)`），
-  写 `(0.1 0.2 0.3)` 会报 `Expected keyword 'uniform' or 'nonuniform'`。
-- 重启算例会覆盖 `elevation.dat`（同一 function object 名字），要保留请改 `-out`/备份。
-- 并行只在 master 写文件，`elevation.dat` 行数与串行一致。
-- `waveElevation` 每次写出都重建射线（`meshSearch`），网格很大、测点很多时会有额外开销；
-  需要极高频采样时建议 `writeControl timeStep; writeInterval N;` 降低频率。
+As long as the case has an `alpha` field, the module is independent of the solver:
 
----
-
-## 9. 验证记录（本机实测）
-
-| 测试 | 结果 |
+| Solver | Comment |
 |---|---|
-| 库编译（**纯 OpenFOAM 环境**，不 source waves2Foam） | 通过，生成 `libwaveMonitoring.so` |
-| `interFoam` + damBreak + 3 个测点 | 1 s 物理时间，488 行数据；x=0.10 处初始 η=0.2905 m（damBreak 初始水深 0.292 m，✔）；t=1 s 时三点 η≈0.0869/0.0867/0.0500 |
-| `waveSpectra` 合成正弦波 | Hm0 误差 0.02%，Tp/Tm02/T1/3 精确 |
-| `waveSpectra` 读 damBreak 数据 | 正常输出 `waveStats.dat` + 3 个谱文件 |
-| `GaugesNProbes` + `probeDefinitions`（1 组 lineDistribution 3 点 + 1 组 userDefinedDistribution 2 点） | 生成 `system/gaugesNProbes.functions` 与 2 个 `.vtk`；`#include` 后 `interFoam` 输出 `waveElevation/<name>/elevation.dat`（3 列）与 `probes` 的 `alpha.water`/`U`（2 点） |
+| `interFoam` / `overInterFoam` | Standard VOF, works directly (tested with `interFoam` + `damBreak`) |
+| `porousWaveFoam` / `waveFoam` | Also works; coexists with waves2Foam's `surfaceElevation` (different type names) |
+| your own solver | enough that `alpha.water` is in the `objectRegistry` |
 
----
+The module only *measures*: wave generation and absorption remain the job of your
+boundary conditions.
 
-## 10. 目录结构
+Choosing `locations`:
+
+- flat-bottom tank: `(x, z_still_water, 0)` is enough — the ray spans the bounding box, so
+  the exact vertical position only selects the column;
+- for arrays, list the points or generate them with `#calc` / `#eval`;
+- the gauges must be inside the mesh.
+
+## 8. Limitations
+
+- The spectral analysis assumes a **uniform time step** (`dt` is averaged); resample
+  non-uniform output first.
+- A restart overwrites `elevation.dat` (same function-object name); rename or back it up
+  if you need to keep it.
+- Only the master writes the file; the parallel output has the same rows as a serial run.
+- `waveElevation` rebuilds the sampling ray on every write (a `meshSearch` per gauge), so
+  very large meshes with many gauges cost extra; lower the sampling rate with
+  `writeInterval` if needed.
+- `userDefinedDistribution` coordinates must be Field syntax
+  (`nonuniform 3(0.1 0.2 0.3)`); `(0.1 0.2 0.3)` is rejected with
+  `Expected keyword 'uniform' or 'nonuniform'`.
+- Topology-changing meshes are supported for moving gauges only approximately (the gauges
+  are re-attached to the new cells at their last known positions).
+
+## 9. Verification
+
+| Test | Result |
+|---|---|
+| Clean build with a plain OpenFOAM environment (no waves2Foam) | `waveMonitoring BUILD OK` after `./Allwclean && ./Allwmake` |
+| `interFoam` + `damBreak`, 3 gauges, 1 s | 488 rows; eta = 0.2905 m at x = 0.10 against the 0.292 m initial depth |
+| `waveSpectra` on a synthetic sine (A = 0.05 m, T = 1.2 s) | Hm0 = 0.141398 vs 0.141421 theory, Tp = Tm02 = T1/3 = 1.200 s |
+| `GaugesNProbes` from `probeDefinitions` (3+2 points) | fragment + 2 VTK files; after `#include`, `elevation.dat` (3 columns) and `probes` output (2 points) |
+| `fixedLocations false` in a tank moving as x = 0.05 sin(10t) | relative position preserved to 6.1e-7 m, eta spread 5e-6 m |
+| `examples/spectra` (JONSWAP) | Hm0 0.0501 vs 0.05, Tp 1.176 vs 1.194, Tm02 0.967 vs 0.962 — PASS |
+
+## 10. Repository layout
 
 ```
 waveMonitoring/
 ├── Allwmake / Allwclean
-├── Make/{files,options}              # libwaveMonitoring.so
-├── waveElevation/
-│   ├── waveElevation.H
-│   └── waveElevation.C               # function object
-├── waveSpectra/
-│   ├── Make/{files,options}
-│   └── waveSpectra.C                 # 后处理程序
+├── Make/{files,options}                  # -> $FOAM_USER_LIBBIN/libwaveMonitoring.so
+├── waveElevation/{waveElevation.H,.C}    # the function object
+├── waveSpectra/{waveSpectra.C,Make/}     # -> $FOAM_USER_APPBIN/waveSpectra
 ├── gaugesNProbes/
-│   ├── Make/{files,options}
-│   ├── GaugesNProbes.C               # probeDefinitions -> functions 片段
-│   └── pointDistributions/           # line/circular/quadrilateral/concatenated/userDefined
-└── examples/
-    ├── waveElevation.controlDict     # 可直接抄的 functions 片段
-    ├── probeDefinitions              # GaugesNProbes 的布局示例
-    └── README.md                     # 用 OpenFOAM 自带 damBreak 做 5 分钟试跑
+│   ├── GaugesNProbes.C                   # -> $FOAM_USER_APPBIN/GaugesNProbes
+│   ├── Make/
+│   └── pointDistributions/               # line/circular/quadrilateral/concatenated/userDefined
+├── examples/
+│   ├── README.md                         # 5-minute damBreak test
+│   ├── probeDefinitions, waveElevation.controlDict
+│   └── spectra/                          # synthetic JONSWAP check (Allrun, makeSignal.py)
+├── README.md                             # this file (English)
+├── README.zh-CN.md                       # Chinese documentation
+└── LICENSE                               # GPL-3.0
 ```
 
----
+## 11. License and citation
 
-## 11. 许可与引用
-
-- **许可**：GNU General Public License v3.0，见 [LICENSE](LICENSE)。本模块派生自
-  [waves2Foam](https://github.com/ogoe/waves2Foam)（GPL）并构建在 OpenFOAM 之上，沿用同一许可。
-- **引用**：用于发表时请引用 waves2Foam 的原始文献：
+- **License**: GNU General Public License v3.0, see [LICENSE](LICENSE). The module derives
+  from [waves2Foam](https://github.com/ogoe/waves2Foam) (GPL) and is built on OpenFOAM, so
+  the same license applies.
+- **Citation**: please cite the original waves2Foam paper when publishing results:
 
   > Jacobsen, N.G., Fuhrman, D.R. and Fredsøe, J. (2012). *A Wave Generation Toolbox for the
   > Open-Source CFD Library: OpenFOAM®*. Int. J. Numer. Meth. Fluids, 70(9), 1073–1088.
   > DOI: [10.1002/fld.2726](https://doi.org/10.1002/fld.2726)
 
----
+## 12. Notes
 
-## 12. 使用须知
-
-- 本模块只负责**测量**：不做造波/消波，波场仍由你算例的边界条件决定。
-- 输出的 η(t)、谱文件与统计量适合直接用于论文制图；`waveSpectra` 的数值精度见第 9 节验证。
-- 有问题或改进建议，欢迎开 issue / PR。
+- The module only *measures*: wave generation and absorption are up to your case setup.
+- The eta(t) files, spectra and statistics are ready for plotting in papers; the numerical
+  accuracy is documented in section 9.
+- Issues and pull requests are welcome.

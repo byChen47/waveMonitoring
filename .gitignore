@@ -9,3 +9,8 @@ lnInclude/
 
 # Output of a case run that happens to live next to the sources
 postProcessing/
+
+# Output of the spectra example
+examples/spectra/elevation.dat
+examples/spectra/targets.txt
+examples/spectra/waveSpectra/
