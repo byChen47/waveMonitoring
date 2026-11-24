@@ -1,4 +1,65 @@
-# waveMonitoring — 独立波浪监测模块
+# waveMonitoring
+
+[![License: GPL v3](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
+[![OpenFOAM](https://img.shields.io/badge/OpenFOAM-v2206%2B-2b6cb0.svg)](https://www.openfoam.com)
+[![Tested](https://img.shields.io/badge/tested-v2606%20%7C%20gcc%209.5-2f855a.svg)](#9-验证记录本机实测)
+
+**Standalone wave measurement for OpenFOAM** — free-surface elevation at gauges,
+gauge/probe generation from `probeDefinitions`, and spectral analysis. It works
+with **any** VOF solver (`interFoam`, `overInterFoam`, or your own) and links
+nothing from waves2Foam.
+
+| Component | Description |
+|---|---|
+| `libwaveMonitoring.so` | `waveElevation` function object: free-surface elevation eta(t) at a list of gauges, written to one self-describing file (optional body-fixed gauges) |
+| `GaugesNProbes` | reads `constant/probeDefinitions` (waves2Foam keywords) and writes a ready-to-include `functions` fragment |
+| `waveSpectra` | spectra and `Hm0`, `Tp`, `Tm02`, `Tm01`, `H1/3`, `T1/3`, `Hmax`, mean water level |
+
+### Quick start
+
+```bash
+source ~/OpenFOAM/OpenFOAM-v2606/etc/bashrc        # any OpenFOAM v2206+
+git clone https://github.com/byChen47/waveMonitoring.git
+cd waveMonitoring && ./Allwmake                    # lib + waveSpectra + GaugesNProbes
+```
+
+Then, in any VOF case (`system/controlDict`):
+
+```cpp
+functions
+{
+    waveElevation1
+    {
+        type            waveElevation;
+        libs            ("libwaveMonitoring.so");
+        locations       ((0.10 0.05 0.005) (0.25 0.05 0.005) (0.40 0.05 0.005));
+        writeControl    timeStep;
+        writeInterval   1;
+    }
+}
+```
+
+and post-process the result:
+
+```bash
+waveSpectra -file postProcessing/waveElevation/waveElevation1/elevation.dat \
+            -out waveSpectra
+```
+
+Or let `GaugesNProbes` generate the gauges from `constant/probeDefinitions`:
+
+```bash
+GaugesNProbes -case .
+# then: functions { #include "gaugesNProbes.functions" }
+```
+
+A 5-minute test with OpenFOAM's own `damBreak` tutorial is described in
+[`examples/`](examples). Gauges can be **fixed in space** (default) or
+**body-fixed** (`fixedLocations false`, following a moving body).
+
+---
+
+## 中文详细说明
 
 从 waves2Foam 里**单独剥离**出来的“测量波浪”部分：**不再需要 waves2Foam 的求解器，也不链接 waves2Foam 的任何库**，
 只要把 `libwaveMonitoring.so` 用 `libs` 加载进 `controlDict`，任何带 VOF 场（`alpha.*`）的求解器都能用。
@@ -48,7 +109,7 @@ powerSpectraLS / reflectionAnalysis            ← 谱分析
 
 ```bash
 source ~/OpenFOAM/OpenFOAM-v2606/etc/bashrc
-cd <此目录>/waveMonitoring
+cd waveMonitoring          # 仓库根目录
 ./Allwmake
 ```
 
@@ -419,3 +480,23 @@ waveMonitoring/
     ├── probeDefinitions              # GaugesNProbes 的布局示例
     └── README.md                     # 用 OpenFOAM 自带 damBreak 做 5 分钟试跑
 ```
+
+---
+
+## 11. 许可与引用
+
+- **许可**：GNU General Public License v3.0，见 [LICENSE](LICENSE)。本模块派生自
+  [waves2Foam](https://github.com/ogoe/waves2Foam)（GPL）并构建在 OpenFOAM 之上，沿用同一许可。
+- **引用**：用于发表时请引用 waves2Foam 的原始文献：
+
+  > Jacobsen, N.G., Fuhrman, D.R. and Fredsøe, J. (2012). *A Wave Generation Toolbox for the
+  > Open-Source CFD Library: OpenFOAM®*. Int. J. Numer. Meth. Fluids, 70(9), 1073–1088.
+  > DOI: [10.1002/fld.2726](https://doi.org/10.1002/fld.2726)
+
+---
+
+## 12. 使用须知
+
+- 本模块只负责**测量**：不做造波/消波，波场仍由你算例的边界条件决定。
+- 输出的 η(t)、谱文件与统计量适合直接用于论文制图；`waveSpectra` 的数值精度见第 9 节验证。
+- 有问题或改进建议，欢迎开 issue / PR。
